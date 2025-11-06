@@ -386,6 +386,10 @@ export default function Player({ channel }: PlayerProps) {
     } else {
       video.play().catch(err => {
         console.error('Play error:', err);
+        // If autoplay is blocked, show an error message
+        if (err.name === 'NotAllowedError') {
+          setError('Playback requires user interaction. Click the play button to start streaming.');
+        }
       });
     }
     setIsPlaying(!isPlaying);
@@ -616,6 +620,22 @@ export default function Player({ channel }: PlayerProps) {
           onPause={handleVideoPause}
           controls={false}
         />
+        
+        {/* Play Button Overlay for Autoplay Issues */}
+        {!isPlaying && !loading && channel && !error && (
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <button
+              onClick={togglePlay}
+              className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 transition-all transform hover:scale-105"
+              aria-label="Play"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          </div>
+        )}
         
         {/* Video Controls Overlay */}
         <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black bg-opacity-80 to-transparent p-4 transition-all duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
