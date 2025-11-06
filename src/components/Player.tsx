@@ -86,7 +86,7 @@ export default function Player({ channel }: PlayerProps) {
       const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
       const isHttpUrl = channel.url.startsWith('http://');
       
-      // Use proxy for HTTP URLs when on HTTPS to avoid mixed content issues
+      // Always use proxy for HTTP URLs when on HTTPS to avoid mixed content issues
       const streamUrl = isHttps && isHttpUrl 
         ? `/api/proxy?url=${encodeURIComponent(channel.url)}`
         : channel.url;
@@ -103,6 +103,14 @@ export default function Player({ channel }: PlayerProps) {
           // Enable automatic recovery
           enableWorker: true,
           enableSoftwareAES: true,
+          // Handle CORS and mixed content for all requests
+          xhrSetup: function(xhr, url) {
+            // If we're on HTTPS and the URL is HTTP, proxy it
+            if (isHttps && url.startsWith('http://')) {
+              const proxiedUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
+              xhr.open('GET', proxiedUrl, true);
+            }
+          }
         });
         hlsRef.current = hls;
         
@@ -113,9 +121,12 @@ export default function Player({ channel }: PlayerProps) {
           console.log('HLS manifest parsed');
           setLoading(false);
           setRetryCount(0); // Reset retry count on successful load
-          video.play().catch((err) => {
-            console.log('Autoplay blocked or failed:', err);
-          });
+          // Try to play after a short delay to allow manifest processing
+          setTimeout(() => {
+            video.play().catch((err) => {
+              console.log('Autoplay blocked or failed:', err);
+            });
+          }, 100);
         });
         
         hls.on(Hls.Events.LEVEL_LOADED, () => {
@@ -227,9 +238,12 @@ export default function Player({ channel }: PlayerProps) {
           console.log('Video metadata loaded');
           setLoading(false);
           setRetryCount(0); // Reset retry count on successful load
-          video.play().catch((err) => {
-            console.log('Autoplay blocked or failed:', err);
-          });
+          // Try to play after a short delay
+          setTimeout(() => {
+            video.play().catch((err) => {
+              console.log('Autoplay blocked or failed:', err);
+            });
+          }, 100);
         });
         video.addEventListener('error', (e) => {
           console.error('Native video error:', e);
@@ -276,9 +290,12 @@ export default function Player({ channel }: PlayerProps) {
           console.log('Video metadata loaded (fallback)');
           setLoading(false);
           setRetryCount(0); // Reset retry count on successful load
-          video.play().catch((err) => {
-            console.log('Autoplay blocked or failed:', err);
-          });
+          // Try to play after a short delay
+          setTimeout(() => {
+            video.play().catch((err) => {
+              console.log('Autoplay blocked or failed:', err);
+            });
+          }, 100);
         });
         video.addEventListener('error', (e) => {
           console.error('Fallback video error:', e);
