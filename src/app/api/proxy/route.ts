@@ -84,9 +84,15 @@ export async function GET(request: NextRequest) {
       const baseUrl = url;
       let processedManifest = manifestText;
       
-      // Handle EXT-X-KEY URIs specifically
-      const keyRegex = /#EXT-X-KEY:METHOD=[^,]+,URI="([^"]+)"/g;
-      processedManifest = processedManifest.replace(keyRegex, (match, keyUri) => {
+      // Handle EXT-X-KEY URIs specifically (both with and without IV)
+      // We need to be careful not to double-encode URLs
+      const keyRegex1 = /#EXT-X-KEY:METHOD=([^,]+),URI="([^"]+)",IV=([^,\n]+)/g;
+      processedManifest = processedManifest.replace(keyRegex1, (match, method, keyUri, iv) => {
+        // Check if the key URI is already proxied
+        if (keyUri.includes('/api/proxy?url=')) {
+          return match; // Already proxied, don't modify
+        }
+        
         try {
           // Make relative key URI absolute
           const absoluteKeyUri = makeAbsoluteUrl(baseUrl, keyUri);
@@ -94,7 +100,29 @@ export async function GET(request: NextRequest) {
           // Check if this is a trusted URL
           if (isTrustedUrl(absoluteKeyUri)) {
             // Proxy trusted key URLs
-            return `#EXT-X-KEY:METHOD=AES-128,URI="/api/proxy?url=${encodeURIComponent(absoluteKeyUri)}"`;
+            return `#EXT-X-KEY:METHOD=${method},URI="/api/proxy?url=${encodeURIComponent(absoluteKeyUri)}",IV=${iv}`;
+          }
+        } catch (e) {
+          console.warn('Failed to process key URI with IV:', keyUri, e);
+        }
+        return match;
+      });
+      
+      const keyRegex2 = /#EXT-X-KEY:METHOD=([^,]+),URI="([^"]+)"/g;
+      processedManifest = processedManifest.replace(keyRegex2, (match, method, keyUri) => {
+        // Check if the key URI is already proxied
+        if (keyUri.includes('/api/proxy?url=')) {
+          return match; // Already proxied, don't modify
+        }
+        
+        try {
+          // Make relative key URI absolute
+          const absoluteKeyUri = makeAbsoluteUrl(baseUrl, keyUri);
+          
+          // Check if this is a trusted URL
+          if (isTrustedUrl(absoluteKeyUri)) {
+            // Proxy trusted key URLs
+            return `#EXT-X-KEY:METHOD=${method},URI="/api/proxy?url=${encodeURIComponent(absoluteKeyUri)}"`;
           }
         } catch (e) {
           console.warn('Failed to process key URI:', keyUri, e);
