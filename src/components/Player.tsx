@@ -125,8 +125,10 @@ export default function Player({ channel }: PlayerProps) {
           setTimeout(() => {
             video.play().catch((err) => {
               console.log('Autoplay blocked or failed:', err);
+              // Show a play button overlay to let user manually start playback
+              setError('Click the play button to start streaming');
             });
-          }, 100);
+          }, 300);
         });
         
         hls.on(Hls.Events.LEVEL_LOADED, () => {
@@ -202,6 +204,32 @@ export default function Player({ channel }: PlayerProps) {
             return;
           }
           
+          // Handle key load errors
+          if (data.details === Hls.ErrorDetails.KEY_LOAD_ERROR) {
+            setError(`Encryption key loading failed. This may be a temporary issue. Retrying... (${retryCount + 1}/${maxRetries})`);
+            if (retryCount < maxRetries) {
+              setTimeout(() => {
+                retryLoad();
+              }, 2000);
+            } else {
+              setError(`Failed to load encryption keys. Stream may be temporarily unavailable.`);
+            }
+            return;
+          }
+          
+          // Handle fragment load errors
+          if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
+            setError(`Segment loading failed. This may be a temporary network issue. Retrying... (${retryCount + 1}/${maxRetries})`);
+            if (retryCount < maxRetries) {
+              setTimeout(() => {
+                retryLoad();
+              }, 2000);
+            } else {
+              setError(`Failed to load stream segments. Please try another channel.`);
+            }
+            return;
+          }
+          
           // Handle other fatal errors
           if (data.fatal) {
             let errorMessage = `Failed to load stream: ${data.type} - ${data.details}`;
@@ -242,8 +270,10 @@ export default function Player({ channel }: PlayerProps) {
           setTimeout(() => {
             video.play().catch((err) => {
               console.log('Autoplay blocked or failed:', err);
+              // Show a play button overlay to let user manually start playback
+              setError('Click the play button to start streaming');
             });
-          }, 100);
+          }, 300);
         });
         video.addEventListener('error', (e) => {
           console.error('Native video error:', e);
@@ -294,8 +324,10 @@ export default function Player({ channel }: PlayerProps) {
           setTimeout(() => {
             video.play().catch((err) => {
               console.log('Autoplay blocked or failed:', err);
+              // Show a play button overlay to let user manually start playback
+              setError('Click the play button to start streaming');
             });
-          }, 100);
+          }, 300);
         });
         video.addEventListener('error', (e) => {
           console.error('Fallback video error:', e);

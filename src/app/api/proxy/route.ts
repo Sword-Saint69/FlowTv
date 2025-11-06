@@ -19,6 +19,24 @@ function isTrustedUrl(url: string): boolean {
   }
 }
 
+// Function to make relative URLs absolute
+function makeAbsoluteUrl(baseUrl: string, relativeUrl: string): string {
+  try {
+    // If it's already absolute, return as is
+    if (relativeUrl.startsWith('http://') || relativeUrl.startsWith('https://')) {
+      return relativeUrl;
+    }
+    
+    // Make relative URL absolute using base URL
+    const base = new URL(baseUrl);
+    const absolute = new URL(relativeUrl, base);
+    return absolute.toString();
+  } catch (error) {
+    console.error('Error making URL absolute:', error);
+    return relativeUrl;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
@@ -50,8 +68,75 @@ export async function GET(request: NextRequest) {
     console.log('Response status:', response.status, 'for URL:', url);
     
     // Create a new response with the stream data
-    const stream = response.body;
+    let stream = response.body;
     const headers = new Headers(response.headers);
+    
+    // Check if this is an HLS manifest (M3U8) and process it
+    const contentType = headers.get('content-type') || '';
+    if (contentType.includes('application/vnd.apple.mpegurl') || 
+        contentType.includes('application/x-mpegURL') || 
+        url.endsWith('.m3u8')) {
+      
+      // Read the manifest content
+      const manifestText = await response.text();
+      
+      // Process the manifest to rewrite URLs
+      const baseUrl = url;
+      let processedManifest = manifestText;
+      
+      // Handle EXT-X-KEY URIs specifically
+      const keyRegex = /#EXT-X-KEY:METHOD=[^,]+,URI="([^"]+)"/g;
+      processedManifest = processedManifest.replace(keyRegex, (match, keyUri) => {
+        try {
+          // Make relative key URI absolute
+          const absoluteKeyUri = makeAbsoluteUrl(baseUrl, keyUri);
+          
+          // Check if this is a trusted URL
+          if (isTrustedUrl(absoluteKeyUri)) {
+            // Proxy trusted key URLs
+            return `#EXT-X-KEY:METHOD=AES-128,URI="/api/proxy?url=${encodeURIComponent(absoluteKeyUri)}"`;
+          }
+        } catch (e) {
+          console.warn('Failed to process key URI:', keyUri, e);
+        }
+        return match;
+      });
+      
+      // Rewrite relative URLs in the manifest to use the proxy
+      // This regex matches URLs in the manifest that need to be proxied
+      const urlRegex = /((?:https?:\/\/[^\s"<>]+)|(?:[^\s"<>]+\.(?:m3u8|ts|key)(?:\?[^\s"<>]*)?))/g;
+      processedManifest = processedManifest.replace(urlRegex, (match) => {
+        // Skip already proxied URLs
+        if (match.includes('/api/proxy?url=')) {
+          return match;
+        }
+        
+        try {
+          // Make relative URLs absolute
+          const absoluteUrl = makeAbsoluteUrl(baseUrl, match);
+          
+          // Check if this is a trusted URL
+          if (isTrustedUrl(absoluteUrl)) {
+            // Proxy trusted URLs
+            return `/api/proxy?url=${encodeURIComponent(absoluteUrl)}`;
+          }
+        } catch (e) {
+          // If URL processing fails, return original
+          console.warn('Failed to process URL in manifest:', match);
+        }
+        
+        return match;
+      });
+      
+      // Convert processed manifest back to stream
+      const encoder = new TextEncoder();
+      stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(processedManifest));
+          controller.close();
+        }
+      });
+    }
     
     // Remove headers that might cause issues
     headers.delete('content-encoding');
