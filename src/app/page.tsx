@@ -1,65 +1,213 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { parseM3U, Channel } from '@/utils/parseM3U';
+import Sidebar from '@/components/Sidebar';
+import Player from '@/components/Player';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const { user, userPreferences, updateFavorites, updateLastWatched } = useAuth();
+
+  useEffect(() => {
+    const loadPlaylist = async () => {
+      try {
+        const response = await fetch('/myplaylist.m3u');
+        if (!response.ok) {
+          throw new Error('Failed to load playlist');
+        }
+        const content = await response.text();
+        const parsedChannels = parseM3U(content);
+        setChannels(parsedChannels);
+        
+        // Load favorites - either from user preferences (if logged in) or localStorage
+        if (user && userPreferences) {
+          setFavorites(new Set(userPreferences.favorites));
+        } else {
+          const savedFavorites = localStorage.getItem('favorites');
+          if (savedFavorites) {
+            setFavorites(new Set(JSON.parse(savedFavorites)));
+          }
+        }
+        
+        // Load last watched channel - either from user preferences (if logged in) or localStorage
+        let lastWatchedId = null;
+        if (user && userPreferences) {
+          lastWatchedId = userPreferences.lastWatched;
+        } else {
+          lastWatchedId = localStorage.getItem('lastWatchedChannel');
+        }
+        
+        if (lastWatchedId) {
+          const lastChannel = parsedChannels.find(ch => ch.id === lastWatchedId);
+          if (lastChannel) {
+            setSelectedChannel(lastChannel);
+          }
+        }
+        
+        setLoading(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An unknown error occurred');
+        setLoading(false);
+      }
+    };
+
+    // Only load playlist if user is authenticated
+    if (user) {
+      loadPlaylist();
+    } else {
+      setLoading(false);
+    }
+  }, [user, userPreferences]);
+
+  const handleChannelSelect = (channel: Channel) => {
+    setSelectedChannel(channel);
+    
+    // Save to user preferences (if logged in) or localStorage
+    if (user) {
+      updateLastWatched(channel.id);
+    } else {
+      localStorage.setItem('lastWatchedChannel', channel.id);
+    }
+  };
+
+  const toggleFavorite = (channelId: string) => {
+    setFavorites(prev => {
+      const newFavorites = new Set(prev);
+      if (newFavorites.has(channelId)) {
+        newFavorites.delete(channelId);
+      } else {
+        newFavorites.add(channelId);
+      }
+      
+      // Save to user preferences (if logged in) or localStorage
+      if (user) {
+        updateFavorites(Array.from(newFavorites));
+      } else {
+        localStorage.setItem('favorites', JSON.stringify(Array.from(newFavorites)));
+      }
+      
+      return newFavorites;
+    });
+  };
+
+  // Keyboard navigation
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // Space to toggle play/pause
+    if (e.code === 'Space') {
+      e.preventDefault();
+      // Play/pause functionality would be handled by the Player component
+    }
+    
+    // F for fullscreen
+    if (e.code === 'KeyF') {
+      // Fullscreen functionality would be handled by the Player component
+    }
+    
+    // Up/Down arrows to navigate channels
+    if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+      e.preventDefault();
+      if (channels.length > 0) {
+        let currentIndex = selectedChannel 
+          ? channels.findIndex(ch => ch.id === selectedChannel.id) 
+          : -1;
+        
+        if (e.code === 'ArrowUp') {
+          currentIndex = currentIndex <= 0 ? channels.length - 1 : currentIndex - 1;
+        } else {
+          currentIndex = currentIndex >= channels.length - 1 ? 0 : currentIndex + 1;
+        }
+        
+        handleChannelSelect(channels[currentIndex]);
+      }
+    }
+  }, [channels, selectedChannel]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen bg-gray-900 text-white">
+        {/* Sidebar Skeleton */}
+        <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
+          <div className="p-4 border-b border-gray-700">
+            <div className="h-8 bg-gray-700 rounded mb-4 animate-pulse"></div>
+            <div className="h-10 bg-gray-700 rounded animate-pulse"></div>
+          </div>
+          <div className="p-4 border-b border-gray-700">
+            <div className="flex flex-wrap gap-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-8 w-16 bg-gray-700 rounded-full animate-pulse"></div>
+              ))}
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {[...Array(10)].map((_, i) => (
+              <div key={i} className="flex items-center p-3">
+                <div className="w-10 h-10 rounded-md bg-gray-700 mr-3 animate-pulse"></div>
+                <div className="flex-1">
+                  <div className="h-4 bg-gray-700 rounded mb-2 animate-pulse"></div>
+                  <div className="h-3 w-3/4 bg-gray-700 rounded animate-pulse"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        {/* Player Skeleton */}
+        <div className="flex-1 flex flex-col">
+          <div className="p-4 bg-gray-900 border-b border-gray-700">
+            <div className="h-6 bg-gray-800 rounded w-1/4 animate-pulse"></div>
+          </div>
+          <div className="flex-1 flex items-center justify-center bg-black">
+            <div className="w-full h-full flex items-center justify-center">
+              <div className="text-center">
+                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <div className="h-4 bg-gray-800 rounded w-48 mx-auto animate-pulse"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to landing page if user is not authenticated
+  if (!user) {
+    router.push('/landing');
+    return null;
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-900">
+        <div className="text-red-500">Error: {error}</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="flex h-screen bg-gray-900 text-white">
+      <Sidebar 
+        channels={channels} 
+        selectedChannel={selectedChannel} 
+        onChannelSelect={handleChannelSelect} 
+        favorites={favorites}
+        onToggleFavorite={toggleFavorite}
+      />
+      <Player channel={selectedChannel} />
     </div>
   );
 }
