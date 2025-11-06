@@ -82,10 +82,19 @@ export default function Player({ channel }: PlayerProps) {
       // Clean up previous HLS instance
       resetHls();
 
+      // Check if we're on HTTPS and the URL is HTTP (mixed content issue)
+      const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+      const isHttpUrl = channel.url.startsWith('http://');
+      
+      // Use proxy for HTTP URLs when on HTTPS to avoid mixed content issues
+      const streamUrl = isHttps && isHttpUrl 
+        ? `/api/proxy?url=${encodeURIComponent(channel.url)}`
+        : channel.url;
+
       // Prioritize HLS.js for better compatibility
       if (Hls.isSupported()) {
         // Use HLS.js
-        console.log('Using HLS.js for:', channel.url);
+        console.log('Using HLS.js for:', streamUrl);
         const hls = new Hls({
           // Configure HLS.js for better buffering
           maxBufferSize: 60 * 1000 * 1000, // 60MB
@@ -97,7 +106,7 @@ export default function Player({ channel }: PlayerProps) {
         });
         hlsRef.current = hls;
         
-        hls.loadSource(channel.url);
+        hls.loadSource(streamUrl);
         hls.attachMedia(video);
         
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -137,7 +146,10 @@ export default function Player({ channel }: PlayerProps) {
           
           // Handle manifest load errors
           if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
-            if (retryCount < maxRetries) {
+            // Check if this is a mixed content error
+            if (channel.url.startsWith('http://') && typeof window !== 'undefined' && window.location.protocol === 'https:') {
+              setError(`Mixed Content Error: Stream is loaded over HTTP but site is HTTPS. Retrying with proxy... (${retryCount + 1}/${maxRetries})`);
+            } else if (retryCount < maxRetries) {
               setError(`Stream loading failed. Retrying... (${retryCount + 1}/${maxRetries})`);
               setTimeout(() => {
                 retryLoad();
@@ -150,7 +162,13 @@ export default function Player({ channel }: PlayerProps) {
           
           // Handle network errors
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            if (retryCount < maxRetries) {
+            // Check if this is a mixed content error
+            if (channel.url.startsWith('http://') && typeof window !== 'undefined' && window.location.protocol === 'https:') {
+              setError(`Mixed Content Error: Stream is loaded over HTTP but site is HTTPS. Retrying with proxy... (${retryCount + 1}/${maxRetries})`);
+              setTimeout(() => {
+                retryLoad();
+              }, 2000);
+            } else if (retryCount < maxRetries) {
               setError(`Network error. Retrying... (${retryCount + 1}/${maxRetries})`);
               setTimeout(() => {
                 retryLoad();
@@ -203,8 +221,8 @@ export default function Player({ channel }: PlayerProps) {
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Native HLS support (Safari)
-        console.log('Using native HLS support for:', channel.url);
-        video.src = channel.url;
+        console.log('Using native HLS support for:', streamUrl);
+        video.src = streamUrl;
         video.addEventListener('loadedmetadata', () => {
           console.log('Video metadata loaded');
           setLoading(false);
@@ -218,8 +236,10 @@ export default function Player({ channel }: PlayerProps) {
           const errorTarget = e.target as HTMLVideoElement;
           let errorMessage = 'Failed to load stream';
           
-          // Try to get more specific error information
-          if (errorTarget.error) {
+          // Check for mixed content issues
+          if (channel.url.startsWith('http://') && typeof window !== 'undefined' && window.location.protocol === 'https:') {
+            errorMessage = 'Mixed Content Error: Stream is loaded over HTTP but site is HTTPS. The browser blocked this request for security reasons.';
+          } else if (errorTarget.error) {
             switch (errorTarget.error.code) {
               case errorTarget.error.MEDIA_ERR_ABORTED:
                 errorMessage = 'Stream loading aborted';
@@ -250,8 +270,8 @@ export default function Player({ channel }: PlayerProps) {
         });
       } else {
         // Fallback - try native video
-        console.log('Using fallback for:', channel.url);
-        video.src = channel.url;
+        console.log('Using fallback for:', streamUrl);
+        video.src = streamUrl;
         video.addEventListener('loadedmetadata', () => {
           console.log('Video metadata loaded (fallback)');
           setLoading(false);
@@ -265,8 +285,10 @@ export default function Player({ channel }: PlayerProps) {
           const errorTarget = e.target as HTMLVideoElement;
           let errorMessage = 'Failed to load stream: Unsupported format or network error. This may be a CORS issue.';
           
-          // Try to get more specific error information
-          if (errorTarget.error) {
+          // Check for mixed content issues
+          if (channel.url.startsWith('http://') && typeof window !== 'undefined' && window.location.protocol === 'https:') {
+            errorMessage = 'Mixed Content Error: Stream is loaded over HTTP but site is HTTPS. The browser blocked this request for security reasons.';
+          } else if (errorTarget.error) {
             switch (errorTarget.error.code) {
               case errorTarget.error.MEDIA_ERR_ABORTED:
                 errorMessage = 'Stream loading aborted';
@@ -528,6 +550,7 @@ export default function Player({ channel }: PlayerProps) {
                     <li>Check your internet connection</li>
                     <li>Try a different channel</li>
                     <li>Refresh the page</li>
+                    <li>If you see a "Mixed Content" error, the stream source doesn't support HTTPS</li>
                     <li>Contact support if issue persists</li>
                   </ul>
                 </div>
@@ -574,11 +597,11 @@ export default function Player({ channel }: PlayerProps) {
                 >
                   {volume > 0 ? (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd" />
+                      <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 010-1.415z" clipRule="evenodd" />
                     </svg>
                   ) : (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                      <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 010-1.415z" clipRule="evenodd" />
                     </svg>
                   )}
                 </button>
