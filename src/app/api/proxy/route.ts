@@ -70,6 +70,12 @@ export async function GET(request: NextRequest) {
     
     console.log('Response status:', response.status, 'for URL:', url);
     
+    // Check for HTTP errors
+    if (!response.ok) {
+      console.error('Upstream error:', response.status, response.statusText, 'for URL:', url);
+      return new Response(`Upstream error: ${response.status} ${response.statusText}`, { status: response.status });
+    }
+    
     // Get the headers from the upstream response
     const headers = new Headers(response.headers);
     
@@ -187,7 +193,19 @@ export async function GET(request: NextRequest) {
         headers
       });
     } else {
-      // For binary content (keys, .ts segments, etc.), handle properly as arrayBuffer
+      // For binary content (keys, .ts segments, etc.), handle properly as raw binary
+      // This is critical for Vercel's serverless environment
+      
+      // Special handling for key files
+      if (url.endsWith('.key')) {
+        console.log('Fetching key file:', url);
+        // Log the response status for debugging
+        console.log('Key file response status:', response.status);
+      }
+      
+      // Fetch as binary
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
       
       // Remove headers that might cause issues
       headers.delete('content-encoding');
@@ -203,13 +221,26 @@ export async function GET(request: NextRequest) {
       // For segments and keys, we might want to allow some caching
       if (!url.endsWith('.key')) {
         headers.set('cache-control', 'public, max-age=3600'); // Cache for 1 hour
+      } else {
+        // For key files, use a shorter cache time
+        headers.set('cache-control', 'public, max-age=300'); // Cache for 5 minutes
       }
       
-      // Get the response as arrayBuffer for binary content
-      const arrayBuffer = await response.arrayBuffer();
+      // Set content type header
+      headers.set('content-type', response.headers.get('content-type') || 'application/octet-stream');
+      
+      // Log key file size for debugging
+      if (url.endsWith('.key')) {
+        console.log('Key file size:', buffer.byteLength, 'bytes');
+        // Key files should typically be 16 bytes for AES-128 encryption
+        if (buffer.byteLength !== 16) {
+          console.warn('Unexpected key file size:', buffer.byteLength, 'bytes. Expected 16 bytes for AES-128.');
+        }
+      }
       
       // Return the binary data with proper headers
-      return new Response(arrayBuffer, {
+      // Using Buffer.from(arrayBuffer) ensures byte-for-byte identical output
+      return new Response(buffer, {
         status: response.status,
         headers
       });

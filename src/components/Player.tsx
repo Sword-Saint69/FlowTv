@@ -110,8 +110,19 @@ export default function Player({ channel }: PlayerProps) {
               const proxiedUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
               xhr.open('GET', proxiedUrl, true);
             }
-            // Set responseType for binary content
-            if (url.endsWith('.key') || url.endsWith('.ts')) {
+            // For key files, let HLS.js fetch them directly when possible
+            // Only proxy if it's an HTTP URL on HTTPS site
+            if (url.endsWith('.key') && isHttps && url.startsWith('http://')) {
+              const proxiedUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
+              xhr.open('GET', proxiedUrl, true);
+              xhr.responseType = 'arraybuffer';
+            }
+            // For .ts segments, set responseType to arraybuffer
+            else if (url.endsWith('.ts')) {
+              xhr.responseType = 'arraybuffer';
+            }
+            // For MP4 segments, set responseType to arraybuffer
+            else if (url.endsWith('.mp4') || url.endsWith('.m4s')) {
               xhr.responseType = 'arraybuffer';
             }
           }
@@ -245,6 +256,12 @@ export default function Player({ channel }: PlayerProps) {
             } else {
               setError(`Failed to load stream segments. Please try another channel.`);
             }
+            return;
+          }
+          
+          // Handle fragment decryption errors
+          if (data.details === Hls.ErrorDetails.FRAG_DECRYPT_ERROR) {
+            setError(`Fragment decryption error - the encryption key may be invalid or inaccessible. Please try another channel.`);
             return;
           }
           
