@@ -19,27 +19,18 @@ function isTrustedUrl(url: string): boolean {
   }
 }
 
-// Function to make relative URLs absolute
-function makeAbsoluteUrl(baseUrl: string, relativeUrl: string): string {
-  try {
-    // If it's already absolute, return as is
-    if (relativeUrl.startsWith('http://') || relativeUrl.startsWith('https://')) {
-      return relativeUrl;
-    }
-    
-    // Make relative URL absolute using base URL
-    const base = new URL(baseUrl);
-    const absolute = new URL(relativeUrl, base);
-    return absolute.toString();
-  } catch (error) {
-    console.error('Error making URL absolute:', error);
-    return relativeUrl;
-  }
-}
-
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const url = searchParams.get('url');
+  const encodedUrl = searchParams.get('url');
+
+  // Decode the URL parameter
+  let url = '';
+  try {
+    url = encodedUrl ? decodeURIComponent(encodedUrl) : '';
+  } catch (error) {
+    console.error('Error decoding URL parameter:', encodedUrl, error);
+    return new Response('Invalid URL parameter', { status: 400 });
+  }
 
   console.log('Proxy request for URL:', url);
 
@@ -57,18 +48,29 @@ export async function GET(request: NextRequest) {
   try {
     console.log('Fetching URL:', url);
     
+    // Prepare headers to forward
+    const forwardHeaders: Record<string, string> = {};
+    const requestHeaders = request.headers;
+    
+    // Forward important headers
+    if (requestHeaders.has('range')) {
+      forwardHeaders['range'] = requestHeaders.get('range') || '';
+    }
+    if (requestHeaders.has('accept')) {
+      forwardHeaders['accept'] = requestHeaders.get('accept') || '';
+    }
+    
+    // Add our user agent
+    forwardHeaders['user-agent'] = 'FlowTV-Player/1.0';
+
     // Fetch the stream with specific headers to handle CORS
     const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'FlowTV-Player/1.0',
-        'Accept': '*/*',
-      }
+      headers: forwardHeaders
     });
     
     console.log('Response status:', response.status, 'for URL:', url);
     
-    // Create a new response with the stream data
-    let stream = response.body;
+    // Get the headers from the upstream response
     const headers = new Headers(response.headers);
     
     // Check if this is an HLS manifest (M3U8) and process it
@@ -77,7 +79,7 @@ export async function GET(request: NextRequest) {
         contentType.includes('application/x-mpegURL') || 
         url.endsWith('.m3u8')) {
       
-      // Read the manifest content
+      // Read the manifest content as text
       const manifestText = await response.text();
       
       // Process the manifest to rewrite URLs
@@ -95,7 +97,7 @@ export async function GET(request: NextRequest) {
         
         try {
           // Make relative key URI absolute
-          const absoluteKeyUri = makeAbsoluteUrl(baseUrl, keyUri);
+          const absoluteKeyUri = new URL(keyUri, baseUrl).toString();
           
           // Check if this is a trusted URL
           if (isTrustedUrl(absoluteKeyUri)) {
@@ -117,7 +119,7 @@ export async function GET(request: NextRequest) {
         
         try {
           // Make relative key URI absolute
-          const absoluteKeyUri = makeAbsoluteUrl(baseUrl, keyUri);
+          const absoluteKeyUri = new URL(keyUri, baseUrl).toString();
           
           // Check if this is a trusted URL
           if (isTrustedUrl(absoluteKeyUri)) {
@@ -141,7 +143,7 @@ export async function GET(request: NextRequest) {
         
         try {
           // Make relative URLs absolute
-          const absoluteUrl = makeAbsoluteUrl(baseUrl, match);
+          const absoluteUrl = new URL(match, baseUrl).toString();
           
           // Check if this is a trusted URL
           if (isTrustedUrl(absoluteUrl)) {
@@ -158,33 +160,60 @@ export async function GET(request: NextRequest) {
       
       // Convert processed manifest back to stream
       const encoder = new TextEncoder();
-      stream = new ReadableStream({
+      const processedStream = new ReadableStream({
         start(controller) {
           controller.enqueue(encoder.encode(processedManifest));
           controller.close();
         }
       });
+      
+      // Remove headers that might cause issues
+      headers.delete('content-encoding');
+      headers.delete('content-length');
+      headers.delete('access-control-allow-origin');
+      
+      // Set CORS headers for the proxy response
+      headers.set('access-control-allow-origin', '*');
+      headers.set('access-control-allow-methods', 'GET, OPTIONS');
+      headers.set('access-control-allow-headers', 'Content-Type, Range, Accept');
+      
+      // Add cache control headers to prevent caching issues for manifests
+      headers.set('cache-control', 'no-cache, no-store, must-revalidate');
+      headers.set('pragma', 'no-cache');
+      headers.set('expires', '0');
+      
+      return new Response(processedStream, {
+        status: response.status,
+        headers
+      });
+    } else {
+      // For binary content (keys, .ts segments, etc.), handle properly as arrayBuffer
+      
+      // Remove headers that might cause issues
+      headers.delete('content-encoding');
+      headers.delete('content-length');
+      headers.delete('access-control-allow-origin');
+      
+      // Set CORS headers for the proxy response
+      headers.set('access-control-allow-origin', '*');
+      headers.set('access-control-allow-methods', 'GET, OPTIONS');
+      headers.set('access-control-allow-headers', 'Content-Type, Range, Accept');
+      
+      // Add cache control headers appropriately
+      // For segments and keys, we might want to allow some caching
+      if (!url.endsWith('.key')) {
+        headers.set('cache-control', 'public, max-age=3600'); // Cache for 1 hour
+      }
+      
+      // Get the response as arrayBuffer for binary content
+      const arrayBuffer = await response.arrayBuffer();
+      
+      // Return the binary data with proper headers
+      return new Response(arrayBuffer, {
+        status: response.status,
+        headers
+      });
     }
-    
-    // Remove headers that might cause issues
-    headers.delete('content-encoding');
-    headers.delete('content-length');
-    headers.delete('access-control-allow-origin');
-    
-    // Set CORS headers for the proxy response
-    headers.set('access-control-allow-origin', '*');
-    headers.set('access-control-allow-methods', 'GET, OPTIONS');
-    headers.set('access-control-allow-headers', 'Content-Type');
-    
-    // Add cache control headers to prevent caching issues
-    headers.set('cache-control', 'no-cache, no-store, must-revalidate');
-    headers.set('pragma', 'no-cache');
-    headers.set('expires', '0');
-    
-    return new Response(stream, {
-      status: response.status,
-      headers
-    });
   } catch (error) {
     console.error('Proxy error for URL:', url, error);
     return new Response('Error fetching stream: ' + (error as Error).message, { status: 500 });

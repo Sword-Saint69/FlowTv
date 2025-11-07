@@ -110,6 +110,10 @@ export default function Player({ channel }: PlayerProps) {
               const proxiedUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
               xhr.open('GET', proxiedUrl, true);
             }
+            // Set responseType for binary content
+            if (url.endsWith('.key') || url.endsWith('.ts')) {
+              xhr.responseType = 'arraybuffer';
+            }
           }
         });
         hlsRef.current = hls;
@@ -123,10 +127,12 @@ export default function Player({ channel }: PlayerProps) {
           setRetryCount(0); // Reset retry count on successful load
           // Try to play after a short delay to allow manifest processing
           setTimeout(() => {
-            video.play().catch((err) => {
+            video.play().catch(err => {
               console.log('Autoplay blocked or failed:', err);
-              // Show a play button overlay to let user manually start playback
-              setError('Click the play button to start streaming');
+              // If autoplay is blocked, show an error message
+              if (err.name === 'NotAllowedError') {
+                setError('Playback requires user interaction. Click the play button to start streaming.');
+              }
             });
           }, 300);
         });
@@ -194,6 +200,18 @@ export default function Player({ channel }: PlayerProps) {
           
           // Handle media errors
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            if (data.details === Hls.ErrorDetails.FRAG_PARSING_ERROR) {
+              setError(`Media parsing error - the stream format may be corrupted or incompatible. This could be a temporary issue. Retrying... (${retryCount + 1}/${maxRetries})`);
+              if (retryCount < maxRetries) {
+                setTimeout(() => {
+                  retryLoad();
+                }, 2000);
+              } else {
+                setError(`Failed to parse stream segments. The stream may be temporarily unavailable or corrupted.`);
+              }
+              return;
+            }
+            
             if (data.fatal) {
               // Try to recover fatal media errors
               hls.recoverMediaError();
@@ -268,10 +286,12 @@ export default function Player({ channel }: PlayerProps) {
           setRetryCount(0); // Reset retry count on successful load
           // Try to play after a short delay
           setTimeout(() => {
-            video.play().catch((err) => {
+            video.play().catch(err => {
               console.log('Autoplay blocked or failed:', err);
-              // Show a play button overlay to let user manually start playback
-              setError('Click the play button to start streaming');
+              // If autoplay is blocked, show an error message
+              if (err.name === 'NotAllowedError') {
+                setError('Playback requires user interaction. Click the play button to start streaming.');
+              }
             });
           }, 300);
         });
@@ -322,10 +342,12 @@ export default function Player({ channel }: PlayerProps) {
           setRetryCount(0); // Reset retry count on successful load
           // Try to play after a short delay
           setTimeout(() => {
-            video.play().catch((err) => {
+            video.play().catch(err => {
               console.log('Autoplay blocked or failed:', err);
-              // Show a play button overlay to let user manually start playback
-              setError('Click the play button to start streaming');
+              // If autoplay is blocked, show an error message
+              if (err.name === 'NotAllowedError') {
+                setError('Playback requires user interaction. Click the play button to start streaming.');
+              }
             });
           }, 300);
         });
